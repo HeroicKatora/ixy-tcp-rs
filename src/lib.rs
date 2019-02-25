@@ -1,4 +1,4 @@
-use ixy::{IxyDevice, Packet};
+use ixy::{IxyDevice, memory::Packet};
 
 /// A generic ixy device as a smoltcp phy device.
 ///

@@ -2,6 +2,7 @@
 name = "ixy-tcp"
 version = "0.1.0"
 authors = ["HeroicKatora <andreas.molzer@gmx.de>"]
+edition = "2018"
 
 [dependencies]
 ixy = { path = "ixy.rs" }
