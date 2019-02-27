@@ -1,26 +1,48 @@
-use ixy::{IxyDevice, memory::Packet};
-use smoltcp::Result as NetResult;
+use std::collections::VecDeque;
+use std::rc::Rc;
+
+use ixy::IxyDevice;
+use ixy::memory::{self, Mempool, Packet};
+
+use smoltcp::{Error as NetError, Result as NetResult};
 use smoltcp::time::Instant;
 use smoltcp::phy;
 
 /// A generic ixy device as a smoltcp phy device.
 ///
 /// Newtype wrapper so that this struct can live in an external crate instead of ixy-rs itself.
-pub struct Phy<D>(D);
+pub struct Phy<D> {
+    /// The underlying device.
+    device: D,
+
+    /// Packets to be processed in receive.
+    rx_queue: VecDeque<Packet>,
+
+    /// Packets which can be used for sending.
+    tx_empty: VecDeque<Packet>,
+
+    /// Memory pool to use for allocation.
+    pool: Rc<Mempool>,
+}
 
 impl<D> Phy<D> {
+    const BATCH_SIZE: usize = 32;
+
+    pub fn new(device: D, pool: Rc<Mempool>) -> Self {
+        Phy {
+            device,
+            rx_queue: VecDeque::with_capacity(Self::BATCH_SIZE),
+            tx_empty: VecDeque::with_capacity(Self::BATCH_SIZE),
+            pool,
+        }
+    }
+
     pub fn inner(&self) -> &D {
-        &self.0
+        &self.device
     }
 
     pub fn into_inner(self) -> D {
-        self.0
-    }
-}
-
-impl<D: IxyDevice> From<D> for Phy<D> {
-    fn from(device: D) -> Self {
-        Phy(device)
+        self.device
     }
 }
 
@@ -50,18 +72,25 @@ impl<'a, D: IxyDevice> phy::Device<'a> for Phy<D> {
 }
 
 impl phy::RxToken for RxToken {
-    fn consume<R, F>(self, ts: Instant, f: F) -> NetResult<R>
+    fn consume<R, F>(self, _ts: Instant, f: F) -> NetResult<R>
         where F: FnOnce(&[u8]) -> NetResult<R>
     {
-        unimplemented!()
+        f(&self.packet)
     }
 }
 
 impl phy::TxToken for TxToken {
-    fn consume<R, F>(self, ts: Instant, length: usize, f: F) -> NetResult<R>
+    fn consume<R, F>(mut self, _ts: Instant, length: usize, f: F) -> NetResult<R>
         where F: FnOnce(&mut [u8]) -> NetResult<R>
     {
-        unimplemented!()
+        if self.packet.len() <= length {
+            // Assume that the packet was chosen as long as possible.  This needs to change if we
+            // allow using a received packet directly but the packet allocator makes them as long
+            // as possible, I think.
+            return Err(NetError::Illegal)
+        }
+
+        f(&mut self.packet[..length])
     }
 }
 
