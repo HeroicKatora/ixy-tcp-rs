@@ -67,7 +67,12 @@ impl<'a, D: IxyDevice> phy::Device<'a> for Phy<D> {
     }
 
     fn capabilities(&self) -> phy::DeviceCapabilities {
-        unimplemented!()
+        let mut capabilities = phy::DeviceCapabilities::default();
+        capabilities.max_transmission_unit = self.pool.entry_size();
+        // FIXME: no idea what this exactly does. May need to return the allocation size of the
+        // buffer here.
+        capabilities.max_burst_size = None;
+        capabilities
     }
 }
 
