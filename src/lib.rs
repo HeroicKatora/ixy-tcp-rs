@@ -21,6 +21,9 @@ pub struct Phy<D> {
     /// Packets which can be used for sending.
     tx_empty: VecDeque<Packet>,
 
+    /// Packets ready for sending but waiting to be batched.
+    tx_queue: VecDeque<Packet>,
+
     /// Memory pool to use for allocation.
     pool: Rc<Mempool>,
 }
@@ -28,21 +31,36 @@ pub struct Phy<D> {
 impl<D> Phy<D> {
     const BATCH_SIZE: usize = 32;
 
-    pub fn new(device: D, pool: Rc<Mempool>) -> Self {
+    pub fn new(device: D, pool: Rc<Mempool>) -> Self where D: IxyDevice {
         Phy {
             device,
             rx_queue: VecDeque::with_capacity(Self::BATCH_SIZE),
             tx_empty: VecDeque::with_capacity(Self::BATCH_SIZE),
+            tx_queue: VecDeque::with_capacity(Self::BATCH_SIZE),
             pool,
         }
     }
 
+    /// Inspect the inner device.
+    ///
+    /// Useful to gather the stats or link metadata.
     pub fn inner(&self) -> &D {
         &self.device
     }
 
     pub fn into_inner(self) -> D {
         self.device
+    }
+
+    /// Empty the send buffer.
+    ///
+    /// The network stack of `smoltcp` only gives an interface for sending single packets. In order
+    /// to do efficient batching, packets are buffered internally until they have reached the
+    /// specific size. Just call this periodically, e.g. each loop iteration.
+    ///
+    /// Returns the number of packets sent due to this call to flush.
+    pub fn flush(&mut self) -> usize where D: IxyDevice {
+        self.device.tx_batch(0, &mut self.tx_queue)
     }
 
     fn rx(&mut self) -> Option<Packet> where D: IxyDevice {
@@ -79,6 +97,10 @@ impl<D> Phy<D> {
 /// Used by `TxToken` as an abstraction so that it does not require the type implementing
 /// `IxyDevice` in its interface.
 trait Sender {
+    /// Add a packet for sending.
+    ///
+    /// It might not send it immediately to batch multiple calls.
+    fn enqueue(&mut self, packet: Packet) -> NetResult<()>;
 }
 
 pub struct RxToken {
@@ -129,6 +151,13 @@ impl<'a, D: IxyDevice> phy::Device<'a> for Phy<D> {
 }
 
 impl<'a, D: IxyDevice> Sender for Phy<D> {
+    fn enqueue(&mut self, packet: Packet) -> NetResult<()> {
+        self.tx_queue.push_back(packet);
+        if self.tx_queue.len() >= Self::BATCH_SIZE {
+            self.flush();
+        }
+        Ok(())
+    }
 }
 
 impl RxToken {
@@ -175,10 +204,9 @@ impl<'a> phy::TxToken for TxToken<'a> {
         // still contain the contents of a previous packet (but not actually uninitialized
         // content, still may be a security vulnerability as this basically bypasses the borrow
         // checker as a custom allocator).
-        f(&mut self.packet[..length])?;
+        let r = f(&mut self.packet[..length])?;
 
-        // TODO: actually send
-        unimplemented!()
+        self.queue.enqueue(self.packet).map(move |_| r)
     }
 }
 
