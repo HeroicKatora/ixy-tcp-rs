@@ -44,26 +44,78 @@ impl<D> Phy<D> {
     pub fn into_inner(self) -> D {
         self.device
     }
+
+    fn rx(&mut self) -> Option<Packet> where D: IxyDevice {
+        if self.rx_queue.is_empty() {
+            self.device.rx_batch(0, &mut self.rx_queue, Self::BATCH_SIZE);
+        }
+
+        // Receive in correct time order.
+        self.rx_queue.pop_front()
+    }
+
+    fn unrx(&mut self, packet: Packet) {
+        self.rx_queue.push_front(packet)
+    }
+
+    fn tx(&mut self) -> Option<Packet> where D: IxyDevice {
+        if self.tx_empty.is_empty() {
+            let max_size = self.pool.entry_size();
+            memory::alloc_pkt_batch(&self.pool, &mut self.tx_empty, Self::BATCH_SIZE, max_size);
+        }
+
+        // Back is the last sent packet, best chance to still be in TLB/mmio cache?
+        self.tx_empty.pop_back()
+    }
+
+    fn untx(&mut self, packet: Packet) {
+        assert!(packet.len() == self.pool.entry_size());
+        self.tx_empty.push_back(packet)
+    }
+}
+
+/// Private trait implementing batched sending.
+///
+/// Used by `TxToken` as an abstraction so that it does not require the type implementing
+/// `IxyDevice` in its interface.
+trait Sender {
 }
 
 pub struct RxToken {
     packet: Packet,
 }
 
-pub struct TxToken {
+pub struct TxToken<'a> {
     packet: Packet,
+    queue: &'a mut Sender,
 }
 
 impl<'a, D: IxyDevice> phy::Device<'a> for Phy<D> {
     type RxToken = RxToken;
-    type TxToken = TxToken;
+    type TxToken = TxToken<'a>;
 
     fn receive(&'a mut self) -> Option<(RxToken, TxToken)> {
-        unimplemented!()
+        match (self.rx(), self.tx()) {
+            (Some(rx), Some(tx)) => {
+                Some((RxToken::from(rx), TxToken::from(tx, self)))
+            },
+            (Some(rx), None) => {
+                self.unrx(rx);
+                None
+            },
+            (None, Some(tx)) => {
+                self.untx(tx);
+                None
+            },
+            (None, None) => None,
+        }
     }
 
     fn transmit(&'a mut self) -> Option<TxToken> {
-        unimplemented!()
+        match self.tx() {
+            None => None,
+            Some(tx) => Some(TxToken::from(tx, self))
+        }
     }
 
     fn capabilities(&self) -> phy::DeviceCapabilities {
@@ -76,6 +128,28 @@ impl<'a, D: IxyDevice> phy::Device<'a> for Phy<D> {
     }
 }
 
+impl<'a, D: IxyDevice> Sender for Phy<D> {
+}
+
+impl RxToken {
+    /// Create an rx token.
+    ///
+    /// Not public through `convert::From` as it should only be created by `Phy`.
+    pub(crate) fn from(packet: Packet) -> Self {
+        RxToken { packet }
+    }
+}
+
+impl<'a> TxToken<'a> {
+    /// Create a tx token.
+    ///
+    /// Not public through `convert::From` as it should only be created by `Phy` and we may have
+    /// additional invariants.
+    pub(crate) fn from(packet: Packet, queue: &'a mut Sender) -> Self {
+        TxToken { packet, queue }
+    }
+}
+
 impl phy::RxToken for RxToken {
     fn consume<R, F>(self, _ts: Instant, f: F) -> NetResult<R>
         where F: FnOnce(&[u8]) -> NetResult<R>
@@ -84,7 +158,7 @@ impl phy::RxToken for RxToken {
     }
 }
 
-impl phy::TxToken for TxToken {
+impl<'a> phy::TxToken for TxToken<'a> {
     fn consume<R, F>(mut self, _ts: Instant, length: usize, f: F) -> NetResult<R>
         where F: FnOnce(&mut [u8]) -> NetResult<R>
     {
@@ -95,14 +169,19 @@ impl phy::TxToken for TxToken {
             return Err(NetError::Illegal)
         }
 
-        f(&mut self.packet[..length])
+        // TODO: resize the packet to the requested size.
+
+        // TODO: evaluate if we need to initialize memory in `packet` before. Currently, it may
+        // still contain the contents of a previous packet (but not actually uninitialized
+        // content, still may be a security vulnerability as this basically bypasses the borrow
+        // checker as a custom allocator).
+        f(&mut self.packet[..length])?;
+
+        // TODO: actually send
+        unimplemented!()
     }
 }
 
 #[cfg(test)]
 mod tests {
-    #[test]
-    fn it_works() {
-        assert_eq!(2 + 2, 4);
-    }
 }
