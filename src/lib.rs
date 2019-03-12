@@ -198,13 +198,15 @@ impl<'a> phy::TxToken for TxToken<'a> {
             return Err(NetError::Illegal)
         }
 
-        // TODO: resize the packet to the requested size.
+        // resize the packet to the requested size.
+        self.packet.truncate(length);
 
-        // TODO: evaluate if we need to initialize memory in `packet` before. Currently, it may
+        // TODO: evaluate if we should initialize memory in `packet` before. Currently, it may
         // still contain the contents of a previous packet (but not actually uninitialized
         // content, still may be a security vulnerability as this basically bypasses the borrow
         // checker as a custom allocator).
-        let r = f(&mut self.packet[..length])?;
+        assert!(self.packet.len() == length);
+        let r = f(&mut self.packet[..])?;
 
         self.queue.enqueue(self.packet).map(move |_| r)
     }
