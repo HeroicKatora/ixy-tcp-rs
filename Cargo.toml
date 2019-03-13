@@ -1,5 +1,5 @@
 [package]
-name = "ixy-tcp"
+name = "ixy-net"
 version = "0.1.0"
 authors = ["HeroicKatora <andreas.molzer@gmx.de>"]
 edition = "2018"
