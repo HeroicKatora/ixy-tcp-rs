@@ -10,3 +10,4 @@ smoltcp = { path = "smoltcp" }
 
 [dev-dependencies]
 env_logger = "0.6"
+structopt = "0.2"

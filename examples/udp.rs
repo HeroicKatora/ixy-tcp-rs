@@ -1,65 +1,82 @@
 //! Bounce packets received via udp.
-use std::{env, process};
-use std::collections::BTreeMap;
+use std::process;
 use std::net::{SocketAddr, SocketAddrV4};
 
 use smoltcp::Error;
 use smoltcp::iface::{EthernetInterfaceBuilder, NeighborCache};
-use smoltcp::phy::EthernetTracer;
 use smoltcp::socket::{UdpPacketMetadata, UdpSocket, SocketSet};
 use smoltcp::storage::PacketBuffer;
 use smoltcp::time::Instant;
 use smoltcp::wire::{EthernetAddress, IpEndpoint, IpCidr};
+
+use structopt::StructOpt;
+
 use ixy::{self, IxyDevice, memory::Mempool};
 use ixy_net::Phy;
+
+#[derive(StructOpt)]
+#[structopt(name="udp_forwarder", about="Udp forwarding interfacing with MoonGen")]
+struct Options {
+    #[structopt(short="i")]
+    in_dev: String,
+    #[structopt(short="I", parse(from_str="parse_addr"))]
+    in_addr: IpEndpoint,
+    #[structopt(short="o")]
+    out_dev: String,
+    #[structopt(short="O", parse(from_str="parse_addr"))]
+    out_addr: IpEndpoint,
+}
 
 fn main() {
     env_logger::init();
 
-    // Start up the network interface itself.
-    let addr = env::args().nth(1).unwrap_or_else(|| {
-        eprintln!("Usage: cargo run --example udp <pci_bus_id> <udp_addr>");
-        process::exit(1)
-    });
+    let Options { in_dev, in_addr, out_dev, out_addr } = Options::from_args();
 
-    let udp_addr = parse_addr(env::args().nth(2).unwrap_or_else(|| {
-        eprintln!("Usage: cargo run --example udp <pci_bus_id> <udp_addr>");
-        process::exit(1)
-    }));
-
-    let phy = init_device(&addr);
-    // let phy = EthernetTracer::new(phy, |time, printer| {
-        // eprintln!("Trace: {}", printer);
-    // });
+    let in_phy = init_device(&in_dev);
+    let out_phy = init_device(&out_dev);
     let mut neighbor_cache = [None; 8];
-    let mut iface = EthernetInterfaceBuilder::new(phy)
+    let mut iface = EthernetInterfaceBuilder::new(in_phy)
         .ethernet_addr(EthernetAddress::from_bytes(&[00,0x1b,0x21,0x94,0xde,0xb4]))
-	.ip_addrs([IpCidr::new(udp_addr.addr, 24)])
+        .ip_addrs([IpCidr::new(in_addr.addr, 24)])
         .neighbor_cache(NeighborCache::new(&mut neighbor_cache[..]))
         .finalize();
 
-    let udp = socket_endpoint(udp_addr);
-    let mut sockets = SocketSet::new(Vec::with_capacity(2));
-    // Add the socket and turn it into a handle.
-    let udp = sockets.add(udp);
+    let mut neighbor_cache = [None; 8];
+    let mut oface = EthernetInterfaceBuilder::new(out_phy)
+        .ethernet_addr(EthernetAddress::from_bytes(&[00,0x1b,0x21,0x94,0xde,0xb4]))
+        .ip_addrs([IpCidr::new(out_addr.addr, 24)])
+        .neighbor_cache(NeighborCache::new(&mut neighbor_cache[..]))
+        .finalize();
 
-    let mut buffer = Vec::new();
+    let in_udp = socket_endpoint(in_addr);
+    let mut in_socket = SocketSet::new(Vec::with_capacity(1));
+    let out_udp = socket_endpoint(out_addr);
+    let mut out_socket = SocketSet::new(Vec::with_capacity(1));
+
+    // Add the sockets and turn it into a handle.
+    let in_udp = in_socket.add(in_udp);
+    let out_udp = out_socket.add(out_udp);
 
     loop {
-        iface.poll(&mut sockets, Instant::now()).unwrap_or_else(|err| {
+        let now = Instant::now();
+        oface.poll(&mut out_socket, now).unwrap_or_else(|err| {
             eprintln!("Error during receive, this may be normal: {:?}", err);
             false
         });
-        let mut socket = sockets.get::<UdpSocket>(udp);
+        iface.poll(&mut in_socket, now).unwrap_or_else(|err| {
+            eprintln!("Error during receive, this may be normal: {:?}", err);
+            false
+        });
+
+        let mut in_sock = in_socket.get::<UdpSocket>(in_udp);
+        let mut out_sock = out_socket.get::<UdpSocket>(out_udp);
 
         // Bounce back every packet.
-	let mut count = 0;
+        let mut count = 0;
         loop {
-            let endpoint = match socket.recv() {
+            let (data, endpoint) = match in_sock.peek() {
                 Ok((slice, endpoint)) => {
-                    buffer.clear();
-                    buffer.extend_from_slice(slice);
-                    endpoint
+                    (slice, *endpoint)
                 },
                 Err(Error::Exhausted) => break,
                 Err(err) => {
@@ -68,13 +85,24 @@ fn main() {
                 },
             };
 
-            socket.send_slice(&buffer, endpoint).unwrap_or_else(|err|
-                eprintln!("Send error: {}", err));
+            match out_sock.send_slice(data, endpoint) {
+                Ok(_) => (),
+                Err(Error::Exhausted) => {
+                    break
+                },
+                Err(err) => {
+                    eprintln!("Send error: {}", err);
+                },
+            }
+
+            // Consume the peeked packet.
+            let _= in_sock.recv();
             count += 1;
         }
-	if count != 0 {
-		eprintln!("Packets bounced: {}", count);
-	}
+
+        if count != 0 {
+            eprintln!("Packets bounced: {}", count);
+        }
     }
 }
 
@@ -97,7 +125,7 @@ fn socket_endpoint(addr: IpEndpoint) -> UdpSocket<'static, 'static> {
     udp
 }
 
-fn parse_addr(arg: String) -> IpEndpoint {
+fn parse_addr(arg: &str) -> IpEndpoint {
     let sock_addr: SocketAddr = arg.parse::<SocketAddrV4>().unwrap_or_else(|err| {
         eprintln!("Second argument not a valid `ip:port` tuple: {}", err);
         process::exit(1)
