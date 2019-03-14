@@ -7,3 +7,6 @@ edition = "2018"
 [dependencies]
 ixy = { path = "ixy.rs" }
 smoltcp = "0.5"
+
+[dev-dependencies]
+env_logger = "0.6"

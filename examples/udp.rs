@@ -14,6 +14,8 @@ use ixy::{self, IxyDevice, memory::Mempool};
 use ixy_net::Phy;
 
 fn main() {
+    env_logger::init();
+
     // Start up the network interface itself.
     let addr = env::args().nth(1).unwrap_or_else(|| {
         eprintln!("Usage: cargo run --example udp <pci_bus_id> <udp_addr>");
