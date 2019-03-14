@@ -27,5 +27,11 @@ machine with different congestion parameters. The setup complexity also makes
 this option badly suited for evaluation during the first implementation phase.
 I'm still on the lookout.
 
+## UDP echo
+
+Running against MoonGen UDP generator and evaluation:
+
+> $ cargo run --example udp 0000:03:00.0 10.0.0.1:319
+
 [NS-2]: https://www.isi.edu/nsnam/ns/
 [TCPEval]: http://users.monash.edu/~lachlana/pubs/TCP-suite-PFLDnet.pdf

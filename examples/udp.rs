@@ -1,9 +1,11 @@
+//! Bounce packets received via udp.
 use std::{env, process};
 use std::collections::BTreeMap;
 use std::net::{SocketAddr, SocketAddrV4};
 
 use smoltcp::Error;
 use smoltcp::iface::{EthernetInterfaceBuilder, NeighborCache};
+use smoltcp::phy::EthernetTracer;
 use smoltcp::socket::{UdpSocket, SocketSet};
 use smoltcp::storage::PacketBuffer;
 use smoltcp::time::Instant;
@@ -19,6 +21,9 @@ fn main() {
     });
 
     let phy = init_device(&addr);
+    // let phy = EthernetTracer::new(phy, |time, printer| {
+        // eprintln!("Trace: {}", printer);
+    // });
     let mut iface = EthernetInterfaceBuilder::new(phy)
         .ethernet_addr(EthernetAddress::from_bytes(&[42, 0xde, 0xad, 0xbe, 0xef, 42]))
         .neighbor_cache(NeighborCache::new(BTreeMap::new()))
@@ -44,6 +49,7 @@ fn main() {
         let mut socket = sockets.get::<UdpSocket>(udp);
 
         // Bounce back every packet.
+	let mut count = 0;
         loop {
             let endpoint = match socket.recv() {
                 Ok((slice, endpoint)) => {
@@ -60,7 +66,11 @@ fn main() {
 
             socket.send_slice(&buffer, endpoint).unwrap_or_else(|err|
                 eprintln!("Send error: {}", err));
+            count += 1;
         }
+	if count != 0 {
+		eprintln!("Packets bounced: {}", count);
+	}
     }
 }
 
