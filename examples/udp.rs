@@ -6,7 +6,7 @@ use std::net::{SocketAddr, SocketAddrV4};
 use smoltcp::Error;
 use smoltcp::iface::{EthernetInterfaceBuilder, NeighborCache};
 use smoltcp::phy::EthernetTracer;
-use smoltcp::socket::{UdpSocket, SocketSet};
+use smoltcp::socket::{UdpPacketMetadata, UdpSocket, SocketSet};
 use smoltcp::storage::PacketBuffer;
 use smoltcp::time::Instant;
 use smoltcp::wire::{EthernetAddress, IpEndpoint, IpCidr};
@@ -31,14 +31,15 @@ fn main() {
     // let phy = EthernetTracer::new(phy, |time, printer| {
         // eprintln!("Trace: {}", printer);
     // });
+    let mut neighbor_cache = [None; 8];
     let mut iface = EthernetInterfaceBuilder::new(phy)
         .ethernet_addr(EthernetAddress::from_bytes(&[00,0x1b,0x21,0x94,0xde,0xb4]))
 	.ip_addrs([IpCidr::new(udp_addr.addr, 24)])
-        .neighbor_cache(NeighborCache::new(BTreeMap::new()))
+        .neighbor_cache(NeighborCache::new(&mut neighbor_cache[..]))
         .finalize();
 
     let udp = socket_endpoint(udp_addr);
-    let mut sockets = SocketSet::new(Vec::new());
+    let mut sockets = SocketSet::new(Vec::with_capacity(2));
     // Add the socket and turn it into a handle.
     let udp = sockets.add(udp);
 
@@ -90,8 +91,8 @@ fn init_device(pci_addr: &str) -> Phy<Box<IxyDevice>> {
 
 fn socket_endpoint(addr: IpEndpoint) -> UdpSocket<'static, 'static> {
     let mut udp = UdpSocket::new(
-        PacketBuffer::new(Vec::new(), Vec::new()),
-        PacketBuffer::new(Vec::new(), Vec::new()));
+        PacketBuffer::new(vec![UdpPacketMetadata::EMPTY; 128], vec![0; 4096]),
+        PacketBuffer::new(vec![UdpPacketMetadata::EMPTY; 128], vec![0; 4096]));
     udp.bind(addr).unwrap();
     udp
 }
