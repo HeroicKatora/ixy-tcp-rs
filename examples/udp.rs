@@ -9,7 +9,7 @@ use smoltcp::phy::EthernetTracer;
 use smoltcp::socket::{UdpSocket, SocketSet};
 use smoltcp::storage::PacketBuffer;
 use smoltcp::time::Instant;
-use smoltcp::wire::{EthernetAddress, IpEndpoint};
+use smoltcp::wire::{EthernetAddress, IpEndpoint, IpCidr};
 use ixy::{self, IxyDevice, memory::Mempool};
 use ixy_net::Phy;
 
@@ -20,19 +20,20 @@ fn main() {
         process::exit(1)
     });
 
+    let udp_addr = parse_addr(env::args().nth(2).unwrap_or_else(|| {
+        eprintln!("Usage: cargo run --example udp <pci_bus_id> <udp_addr>");
+        process::exit(1)
+    }));
+
     let phy = init_device(&addr);
     // let phy = EthernetTracer::new(phy, |time, printer| {
         // eprintln!("Trace: {}", printer);
     // });
     let mut iface = EthernetInterfaceBuilder::new(phy)
-        .ethernet_addr(EthernetAddress::from_bytes(&[42, 0xde, 0xad, 0xbe, 0xef, 42]))
+        .ethernet_addr(EthernetAddress::from_bytes(&[00,0x1b,0x21,0x94,0xde,0xb4]))
+	.ip_addrs([IpCidr::new(udp_addr.addr, 24)])
         .neighbor_cache(NeighborCache::new(BTreeMap::new()))
         .finalize();
-
-    let udp_addr = parse_addr(env::args().nth(2).unwrap_or_else(|| {
-        eprintln!("Usage: cargo run --example udp <pci_bus_id> <udp_addr>");
-        process::exit(1)
-    }));
 
     let udp = socket_endpoint(udp_addr);
     let mut sockets = SocketSet::new(Vec::new());

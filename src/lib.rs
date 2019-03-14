@@ -142,6 +142,7 @@ impl<'a, D: IxyDevice> phy::Device<'a> for Phy<D> {
 
     fn capabilities(&self) -> phy::DeviceCapabilities {
         let mut capabilities = phy::DeviceCapabilities::default();
+	capabilities.checksum = phy::ChecksumCapabilities::ignored();
         capabilities.max_transmission_unit = self.pool.entry_size();
         // FIXME: no idea what this exactly does. May need to return the allocation size of the
         // buffer here.
