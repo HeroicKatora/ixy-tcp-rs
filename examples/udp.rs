@@ -3,11 +3,11 @@ use std::process;
 use std::net::{SocketAddr, SocketAddrV4};
 
 use smoltcp::Error;
-use smoltcp::iface::{EthernetInterfaceBuilder, NeighborCache};
+use smoltcp::iface::{EthernetInterfaceBuilder, NeighborCache, Routes};
 use smoltcp::socket::{UdpPacketMetadata, UdpSocket, SocketSet};
 use smoltcp::storage::PacketBuffer;
 use smoltcp::time::Instant;
-use smoltcp::wire::{EthernetAddress, IpEndpoint, IpCidr};
+use smoltcp::wire::{EthernetAddress, IpAddress, IpEndpoint, IpCidr};
 
 use structopt::StructOpt;
 
@@ -42,10 +42,21 @@ fn main() {
         .finalize();
 
     let mut neighbor_cache = [None; 8];
+    let mut oroutes = [None; 1];
+    let routes = {
+        let gateway = match out_addr.addr { 
+            IpAddress::Ipv4(addr) => addr,
+            _ => unreachable!("Only ipv4 addresses assigned to outgoing interface"),
+        };
+        let mut routes = Routes::new(&mut oroutes[..]);
+        routes.add_default_ipv4_route(gateway).unwrap();
+        routes
+    };
     let mut oface = EthernetInterfaceBuilder::new(out_phy)
         .ethernet_addr(EthernetAddress::from_bytes(&[00,0x1b,0x21,0x94,0xde,0xb4]))
         .ip_addrs([IpCidr::new(out_addr.addr, 24)])
         .neighbor_cache(NeighborCache::new(&mut neighbor_cache[..]))
+        .routes(routes)
         .finalize();
 
     let in_udp = socket_endpoint(in_addr);
