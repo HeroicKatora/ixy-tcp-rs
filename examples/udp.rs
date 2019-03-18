@@ -3,11 +3,12 @@ use std::process;
 use std::net::{SocketAddr, SocketAddrV4};
 
 use smoltcp::Error;
+use smoltcp::phy::Tracer;
 use smoltcp::iface::{EthernetInterfaceBuilder, NeighborCache, Routes};
 use smoltcp::socket::{UdpPacketMetadata, UdpSocket, SocketSet};
 use smoltcp::storage::PacketBuffer;
 use smoltcp::time::Instant;
-use smoltcp::wire::{EthernetAddress, IpAddress, IpEndpoint, IpCidr};
+use smoltcp::wire::{EthernetAddress, EthernetFrame, IpAddress, IpEndpoint, IpCidr, PrettyPrinter};
 
 use structopt::StructOpt;
 
@@ -21,30 +22,45 @@ struct Options {
     in_dev: String,
     #[structopt(short="I", parse(from_str="parse_addr"))]
     in_addr: IpEndpoint,
+    #[structopt(short="r", parse(from_str="parse_addr"))]
+    remote_a: IpEndpoint,
     #[structopt(short="o")]
     out_dev: String,
     #[structopt(short="O", parse(from_str="parse_addr"))]
     out_addr: IpEndpoint,
+    #[structopt(short="s", parse(from_str="parse_addr"))]
+    remote_b: IpEndpoint,
+}
+
+struct Forward {
+    from: IpEndpoint,
+    to: IpEndpoint,
 }
 
 fn main() {
     env_logger::init();
 
-    let Options { in_dev, in_addr, out_dev, out_addr } = Options::from_args();
+    let options = Options::from_args();
 
-    let in_phy = init_device(&in_dev);
-    let out_phy = init_device(&out_dev);
+    let in_phy = init_device(&options.in_dev);
+    let out_phy = init_device(&options.out_dev);
+    let in_phy = Tracer::new(in_phy, |_time, pp: PrettyPrinter<EthernetFrame<&[u8]>>| {
+        eprintln!("{}", pp);
+    });
+    let out_phy = Tracer::new(out_phy, |_time, pp: PrettyPrinter<EthernetFrame<&[u8]>>| {
+        eprintln!("{}", pp);
+    });
     let mut neighbor_cache = [None; 8];
     let mut iface = EthernetInterfaceBuilder::new(in_phy)
         .ethernet_addr(EthernetAddress::from_bytes(&[00,0x1b,0x21,0x94,0xde,0xb4]))
-        .ip_addrs([IpCidr::new(in_addr.addr, 24)])
+        .ip_addrs([IpCidr::new(options.in_addr.addr, 24)])
         .neighbor_cache(NeighborCache::new(&mut neighbor_cache[..]))
         .finalize();
 
     let mut neighbor_cache = [None; 8];
     let mut oroutes = [None; 1];
     let routes = {
-        let gateway = match out_addr.addr { 
+        let gateway = match options.out_addr.addr { 
             IpAddress::Ipv4(addr) => addr,
             _ => unreachable!("Only ipv4 addresses assigned to outgoing interface"),
         };
@@ -53,15 +69,15 @@ fn main() {
         routes
     };
     let mut oface = EthernetInterfaceBuilder::new(out_phy)
-        .ethernet_addr(EthernetAddress::from_bytes(&[00,0x1b,0x21,0x94,0xde,0xb4]))
-        .ip_addrs([IpCidr::new(out_addr.addr, 24)])
+        .ethernet_addr(EthernetAddress::from_bytes(&[00,0x1b,0x21,0x94,0xde,0xb5]))
+        .ip_addrs([IpCidr::new(options.out_addr.addr, 24)])
         .neighbor_cache(NeighborCache::new(&mut neighbor_cache[..]))
         .routes(routes)
         .finalize();
 
-    let in_udp = socket_endpoint(in_addr);
+    let in_udp = socket_endpoint(options.in_addr);
     let mut in_socket = SocketSet::new(Vec::with_capacity(1));
-    let out_udp = socket_endpoint(out_addr);
+    let out_udp = socket_endpoint(options.out_addr);
     let mut out_socket = SocketSet::new(Vec::with_capacity(1));
 
     // Add the sockets and turn it into a handle.
@@ -70,46 +86,21 @@ fn main() {
 
     loop {
         let now = Instant::now();
-        oface.poll(&mut out_socket, now).unwrap_or_else(|err| {
-            eprintln!("Error during receive, this may be normal: {:?}", err);
+        iface.poll(&mut in_socket, now).unwrap_or_else(|err| {
+            eprintln!("Error polling first socket, this may be normal: {:?}", err);
             false
         });
-        iface.poll(&mut in_socket, now).unwrap_or_else(|err| {
-            eprintln!("Error during receive, this may be normal: {:?}", err);
+        oface.poll(&mut out_socket, now).unwrap_or_else(|err| {
+            eprintln!("Error polling second socket, this may be normal: {:?}", err);
             false
         });
 
         let mut in_sock = in_socket.get::<UdpSocket>(in_udp);
         let mut out_sock = out_socket.get::<UdpSocket>(out_udp);
 
-        // Bounce back every packet.
-        let mut count = 0;
-        loop {
-            let (data, endpoint) = match in_sock.peek() {
-                Ok((slice, endpoint)) => {
-                    (slice, *endpoint)
-                },
-                Err(Error::Exhausted) => break,
-                Err(err) => {
-                    eprintln!("Receive error: {}", err);
-                    break
-                },
-            };
-
-            match out_sock.send_slice(data, endpoint) {
-                Ok(_) => (),
-                Err(Error::Exhausted) => {
-                    break
-                },
-                Err(err) => {
-                    eprintln!("Send error: {}", err);
-                },
-            }
-
-            // Consume the peeked packet.
-            let _= in_sock.recv();
-            count += 1;
-        }
+        let in_count = forward(&mut in_sock, &mut out_sock, options.forward_a());
+        let out_count = forward(&mut out_sock, &mut in_sock, options.forward_b());
+        let count = in_count + out_count;
 
         if count != 0 {
             eprintln!("Packets bounced: {}", count);
@@ -143,4 +134,50 @@ fn parse_addr(arg: &str) -> IpEndpoint {
     }).into();
 
     sock_addr.into()
+}
+
+fn forward(in_sock: &mut UdpSocket, out_sock: &mut UdpSocket, config: Forward) -> usize {
+    let mut count = 0;
+    loop {
+        let (data, endpoint) = match in_sock.peek() {
+            Ok((slice, endpoint)) => {
+                (slice, *endpoint)
+            },
+            Err(Error::Exhausted) => break,
+            Err(err) => {
+                eprintln!("Receive error: {}", err);
+                break
+            },
+        };
+
+        match out_sock.send_slice(data, config.to) {
+            Ok(_) => count += 1,
+            Err(Error::Exhausted) => {
+                // Do nothing, we just drop that packet.
+            },
+            Err(err) => {
+                eprintln!("Send error: {}", err);
+            },
+        }
+
+        // Consume the peeked packet.
+        let _= in_sock.recv();
+    }
+    count
+}
+
+impl Options {
+    fn forward_a(&self) -> Forward {
+        Forward {
+            from: self.remote_a,
+            to: self.remote_b,
+        }
+    }
+
+    fn forward_b(&self) -> Forward {
+        Forward {
+            from: self.remote_b,
+            to: self.remote_a,
+        }
+    }
 }
