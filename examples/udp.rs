@@ -50,17 +50,39 @@ fn main() {
     let out_phy = Tracer::new(out_phy, |_time, pp: PrettyPrinter<EthernetFrame<&[u8]>>| {
         eprintln!("{}", pp);
     });
+
     let mut neighbor_cache = [None; 8];
+    let mut neighbor_cache = NeighborCache::new(&mut neighbor_cache[..]);
+    neighbor_cache.fill(
+        options.remote_a.addr,
+        EthernetAddress::from_bytes(&[0, 1, 2, 3, 4, 5, 6]),
+        Instant::now());
+    let mut iroutes = [None; 1];
+    let routes = {
+        let gateway = match options.remote_a.addr { 
+            IpAddress::Ipv4(addr) => addr,
+            _ => unreachable!("Only ipv4 addresses assigned to outgoing interface"),
+        };
+        let mut routes = Routes::new(&mut iroutes[..]);
+        routes.add_default_ipv4_route(gateway).unwrap();
+        routes
+    };
     let mut iface = EthernetInterfaceBuilder::new(in_phy)
         .ethernet_addr(EthernetAddress::from_bytes(&[00,0x1b,0x21,0x94,0xde,0xb4]))
         .ip_addrs([IpCidr::new(options.in_addr.addr, 24)])
-        .neighbor_cache(NeighborCache::new(&mut neighbor_cache[..]))
+        .neighbor_cache(neighbor_cache)
+        .routes(routes)
         .finalize();
 
     let mut neighbor_cache = [None; 8];
+    let mut neighbor_cache = NeighborCache::new(&mut neighbor_cache[..]);
+    neighbor_cache.fill(
+        options.remote_b.addr,
+        EthernetAddress::from_bytes(&[0, 1, 2, 3, 4, 5, 6]),
+        Instant::now());
     let mut oroutes = [None; 1];
     let routes = {
-        let gateway = match options.out_addr.addr { 
+        let gateway = match options.remote_b.addr { 
             IpAddress::Ipv4(addr) => addr,
             _ => unreachable!("Only ipv4 addresses assigned to outgoing interface"),
         };
@@ -71,7 +93,7 @@ fn main() {
     let mut oface = EthernetInterfaceBuilder::new(out_phy)
         .ethernet_addr(EthernetAddress::from_bytes(&[00,0x1b,0x21,0x94,0xde,0xb5]))
         .ip_addrs([IpCidr::new(options.out_addr.addr, 24)])
-        .neighbor_cache(NeighborCache::new(&mut neighbor_cache[..]))
+        .neighbor_cache(neighbor_cache)
         .routes(routes)
         .finalize();
 
