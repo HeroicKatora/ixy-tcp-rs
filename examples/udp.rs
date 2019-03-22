@@ -55,7 +55,7 @@ fn main() {
     let mut neighbor_cache = NeighborCache::new(&mut neighbor_cache[..]);
     neighbor_cache.fill(
         options.remote_a.addr,
-        EthernetAddress::from_bytes(&[0, 1, 2, 3, 4, 5, 6]),
+        EthernetAddress::from_bytes(&[0, 1, 2, 3, 4, 5]),
         Instant::now());
     let mut iroutes = [None; 1];
     let routes = {
@@ -78,7 +78,7 @@ fn main() {
     let mut neighbor_cache = NeighborCache::new(&mut neighbor_cache[..]);
     neighbor_cache.fill(
         options.remote_b.addr,
-        EthernetAddress::from_bytes(&[0, 1, 2, 3, 4, 5, 6]),
+        EthernetAddress::from_bytes(&[0, 1, 2, 3, 4, 5]),
         Instant::now());
     let mut oroutes = [None; 1];
     let routes = {
