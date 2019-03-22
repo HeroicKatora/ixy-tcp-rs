@@ -3,7 +3,7 @@ use std::process;
 use std::net::{SocketAddr, SocketAddrV4};
 
 use smoltcp::Error;
-use smoltcp::phy::Tracer;
+use smoltcp::phy::{Tracer, KillSwitch};
 use smoltcp::iface::{EthernetInterfaceBuilder, NeighborCache, Routes};
 use smoltcp::socket::{UdpPacketMetadata, UdpSocket, SocketSet};
 use smoltcp::storage::PacketBuffer;
@@ -50,6 +50,10 @@ fn main() {
     let out_phy = Tracer::new(out_phy, |_time, pp: PrettyPrinter<EthernetFrame<&[u8]>>| {
         eprintln!("{}", pp);
     });
+    let in_phy = KillSwitch::new(in_phy);
+    let out_phy = KillSwitch::new(out_phy);
+    let in_switch = in_phy.switch();
+    let out_switch = out_phy.switch();
 
     let mut neighbor_cache = [None; 8];
     let mut neighbor_cache = NeighborCache::new(&mut neighbor_cache[..]);
@@ -106,6 +110,7 @@ fn main() {
     let in_udp = in_socket.add(in_udp);
     let out_udp = out_socket.add(out_udp);
 
+    let mut rx_disabled = false;
     loop {
         let now = Instant::now();
         iface.poll(&mut in_socket, now).unwrap_or_else(|err| {
@@ -123,6 +128,10 @@ fn main() {
         let in_count = forward(&mut in_sock, &mut out_sock, options.forward_a());
         let out_count = forward(&mut out_sock, &mut in_sock, options.forward_b());
         let count = in_count + out_count;
+
+        rx_disabled = !rx_disabled;
+        in_switch.kill_rx(rx_disabled);
+        out_switch.kill_rx(rx_disabled);
 
         if count != 0 {
             eprintln!("Packets bounced: {}", count);
