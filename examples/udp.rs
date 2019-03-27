@@ -1,6 +1,7 @@
 //! Bounce packets received via udp.
 use std::process;
 use std::net::{SocketAddr, SocketAddrV4};
+use std::time::Instant as StdInstant;
 
 use smoltcp::Error;
 use smoltcp::phy::{Tracer, KillSwitch};
@@ -12,7 +13,7 @@ use smoltcp::wire::{EthernetAddress, EthernetFrame, IpAddress, IpEndpoint, IpCid
 
 use structopt::StructOpt;
 
-use ixy::{self, IxyDevice, memory::Mempool};
+use ixy::{self, DeviceStats, IxyDevice, memory::Mempool};
 use ixy_net::Phy;
 
 #[derive(StructOpt)]
@@ -35,6 +36,12 @@ struct Options {
 struct Forward {
     from: IpEndpoint,
     to: IpEndpoint,
+}
+
+struct Measure {
+    time: StdInstant,
+    stats_a: DeviceStats,
+    stats_b: DeviceStats,
 }
 
 fn main() {
@@ -110,9 +117,16 @@ fn main() {
     let in_udp = in_socket.add(in_udp);
     let out_udp = out_socket.add(out_udp);
 
+    let mut count = 0;
     let mut rx_disabled = false;
+    let mut measure = Measure::new(iface.phy().ixy(), oface.phy().ixy());
     loop {
         let now = Instant::now();
+
+        if count & 0xfff == 0 {
+            measure.print(iface.phy().ixy(), oface.phy().ixy());
+        }
+
         iface.poll(&mut in_socket, now).unwrap_or_else(|err| {
             eprintln!("Error polling first socket, this may be normal: {:?}", err);
             false
@@ -125,17 +139,14 @@ fn main() {
         let mut in_sock = in_socket.get::<UdpSocket>(in_udp);
         let mut out_sock = out_socket.get::<UdpSocket>(out_udp);
 
-        let in_count = forward(&mut in_sock, &mut out_sock, options.forward_a());
-        let out_count = forward(&mut out_sock, &mut in_sock, options.forward_b());
-        let count = in_count + out_count;
+        let _in_count = forward(&mut in_sock, &mut out_sock, options.forward_a());
+        let _out_count = forward(&mut out_sock, &mut in_sock, options.forward_b());
 
         rx_disabled = !rx_disabled;
         in_switch.kill_rx(rx_disabled);
         out_switch.kill_rx(rx_disabled);
 
-        if count != 0 {
-            eprintln!("Packets bounced: {}", count);
-        }
+        count += 1;
     }
 }
 
@@ -210,5 +221,40 @@ impl Options {
             from: self.remote_b,
             to: self.remote_a,
         }
+    }
+}
+
+impl Measure {
+    pub fn new(phy1: &dyn IxyDevice, phy2: &dyn IxyDevice) -> Self {
+        let mut stats_a = DeviceStats::default();
+        let mut stats_b = DeviceStats::default();
+        phy1.reset_stats();
+        phy2.reset_stats();
+        phy1.read_stats(&mut stats_a);
+        phy2.read_stats(&mut stats_b);
+
+        Measure {
+            time: StdInstant::now(),
+            stats_a,
+            stats_b,
+        }
+    }
+
+    pub fn print(&mut self, phy1: &dyn IxyDevice, phy2: &dyn IxyDevice) {
+        let mut stats_a_new = DeviceStats::default();
+        let mut stats_b_new = DeviceStats::default();
+
+        let now = StdInstant::now();
+        let elapsed = now - self.time;
+        let nanos = 1_000_000_000*elapsed.as_secs() as u32 + elapsed.subsec_nanos();
+        phy1.read_stats(&mut stats_a_new);
+        phy2.read_stats(&mut stats_b_new);
+
+        stats_a_new.print_stats_diff(phy1, &self.stats_a, nanos);
+        stats_b_new.print_stats_diff(phy2, &self.stats_b, nanos);
+
+        self.stats_a = stats_a_new;
+        self.stats_b = stats_b_new;
+        self.time = now;
     }
 }

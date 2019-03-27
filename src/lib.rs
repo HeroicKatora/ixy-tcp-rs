@@ -44,7 +44,7 @@ impl<D> Phy<D> {
     /// Inspect the inner device.
     ///
     /// Useful to gather the stats or link metadata.
-    pub fn inner(&self) -> &D {
+    pub fn ixy(&self) -> &D {
         &self.device
     }
 
