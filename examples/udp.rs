@@ -4,7 +4,7 @@ use std::net::{SocketAddr, SocketAddrV4};
 use std::time::Instant as StdInstant;
 
 use smoltcp::Error;
-use smoltcp::phy::{Tracer, KillSwitch};
+use smoltcp::phy::Tracer;
 use smoltcp::iface::{EthernetInterfaceBuilder, NeighborCache, Routes};
 use smoltcp::socket::{UdpPacketMetadata, UdpSocket, SocketSet};
 use smoltcp::storage::PacketBuffer;
@@ -57,10 +57,6 @@ fn main() {
     let out_phy = Tracer::new(out_phy, |_time, pp: PrettyPrinter<EthernetFrame<&[u8]>>| {
         eprintln!("{}", pp);
     });
-    let in_phy = KillSwitch::new(in_phy);
-    let out_phy = KillSwitch::new(out_phy);
-    let in_switch = in_phy.switch();
-    let out_switch = out_phy.switch();
 
     let mut neighbor_cache = [None; 8];
     let mut neighbor_cache = NeighborCache::new(&mut neighbor_cache[..]);
@@ -118,7 +114,6 @@ fn main() {
     let out_udp = out_socket.add(out_udp);
 
     let mut count = 0;
-    let mut rx_disabled = false;
     let mut measure = Measure::new(iface.phy().ixy(), oface.phy().ixy());
     loop {
         let now = Instant::now();
@@ -142,10 +137,6 @@ fn main() {
         let _in_count = forward(&mut in_sock, &mut out_sock, options.forward_a());
         let _out_count = forward(&mut out_sock, &mut in_sock, options.forward_b());
 
-        rx_disabled = !rx_disabled;
-        in_switch.kill_rx(rx_disabled);
-        out_switch.kill_rx(rx_disabled);
-
         count += 1;
     }
 }
@@ -161,7 +152,7 @@ fn init_device(pci_addr: &str) -> Phy<Box<IxyDevice>> {
     Phy::new(device, pool)
 }
 
-fn socket_endpoint(addr: IpEndpoint) -> UdpSocket<'static, 'static> {
+fn socket_endpoint(addr: IpEndpoint) -> UdpSocket<'static> {
     let mut udp = UdpSocket::new(
         PacketBuffer::new(vec![UdpPacketMetadata::EMPTY; 128], vec![0; 4096]),
         PacketBuffer::new(vec![UdpPacketMetadata::EMPTY; 128], vec![0; 4096]));
@@ -170,10 +161,10 @@ fn socket_endpoint(addr: IpEndpoint) -> UdpSocket<'static, 'static> {
 }
 
 fn parse_addr(arg: &str) -> IpEndpoint {
-    let sock_addr: SocketAddr = arg.parse::<SocketAddrV4>().unwrap_or_else(|err| {
+    let sock_addr = arg.parse::<SocketAddrV4>().unwrap_or_else(|err| {
         eprintln!("Second argument not a valid `ip:port` tuple: {}", err);
         process::exit(1)
-    }).into();
+    });
 
     sock_addr.into()
 }
