@@ -9,7 +9,7 @@ use smoltcp::iface::{EthernetInterfaceBuilder, NeighborCache, Routes};
 use smoltcp::socket::{UdpPacketMetadata, UdpSocket, SocketSet};
 use smoltcp::storage::PacketBuffer;
 use smoltcp::time::Instant;
-use smoltcp::wire::{EthernetAddress, EthernetFrame, IpAddress, IpEndpoint, IpCidr, PrettyPrinter};
+use smoltcp::wire::{EthernetAddress, EthernetFrame, IpAddress, Ipv4Address, IpEndpoint, IpCidr, PrettyPrinter};
 
 use structopt::StructOpt;
 
@@ -152,7 +152,7 @@ fn init_device(pci_addr: &str) -> Phy<Box<IxyDevice>> {
     Phy::new(device, pool)
 }
 
-fn socket_endpoint(addr: IpEndpoint) -> UdpSocket<'static> {
+fn socket_endpoint(addr: IpEndpoint) -> UdpSocket<'static, 'static> {
     let mut udp = UdpSocket::new(
         PacketBuffer::new(vec![UdpPacketMetadata::EMPTY; 128], vec![0; 4096]),
         PacketBuffer::new(vec![UdpPacketMetadata::EMPTY; 128], vec![0; 4096]));
@@ -166,7 +166,8 @@ fn parse_addr(arg: &str) -> IpEndpoint {
         process::exit(1)
     });
 
-    sock_addr.into()
+    let [a, b, c, d] = sock_addr.ip().octets();
+    (Ipv4Address::new(a, b, c, d), sock_addr.port()).into()
 }
 
 fn forward(in_sock: &mut UdpSocket, out_sock: &mut UdpSocket, config: Forward) -> usize {
