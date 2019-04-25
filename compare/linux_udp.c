@@ -24,9 +24,12 @@ int main(int argc, char** argv) {
 		exit(1);
 	}
 
+	printf("[+] Startup\n");
 	sock_a = init_udp_sock(argv[1]);
 	sock_b = init_udp_sock(argv[2]);
 	fd_epoll = init_epoll(sock_a, sock_b);
+
+	printf("[+] Initialized\n");
 
 	for(;;) {
 		nfds = epoll_wait(fd_epoll, events, MAX_EVENTS, -1);
@@ -71,16 +74,20 @@ int init_udp_sock(const char* bind_addr) {
 	}
 
 	addr.sin_family = AF_INET;
-	addr.sin_port = 243;
+	addr.sin_port = htons(319);
 	if(inet_aton(bind_addr, &addr.sin_addr) == 0) {
 		perror("Not a valid address");
 		exit(1);
 	}
 
+	printf("[+] Socket created\n");
+
 	if(bind(sock, (struct sockaddr *) &addr, sizeof(struct sockaddr_in)) < 0) {
 		perror("Failed to bind socket to address");
 		exit(1);
 	}
+
+	printf("[+] Socket bound to %s\n", bind_addr);
 
 	return sock;
 }
