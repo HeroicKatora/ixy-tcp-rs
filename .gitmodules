@@ -4,3 +4,6 @@
 [submodule "smoltcp"]
 	path = smoltcp
 	url = https://github.com/HeroicKatora/smoltcp
+[submodule "ethox"]
+	path = ethox
+	url = https://github.com/HeroicKatora/ethox
