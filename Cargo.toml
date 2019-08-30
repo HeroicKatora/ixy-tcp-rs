@@ -6,7 +6,7 @@ edition = "2018"
 
 [dependencies]
 ixy = { path = "ixy.rs" }
-ethox = { path = "ethox", features = ["std"] }
+ethox = { path = "ethox/ethox", features = ["std"] }
 
 [dev-dependencies]
 env_logger = "0.6"
