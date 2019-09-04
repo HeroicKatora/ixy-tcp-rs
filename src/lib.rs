@@ -180,7 +180,7 @@ impl<D: IxyDevice> nic::Device for Phy<D> {
 
         // Gather those sent again immediately
         let tx_queue = &mut self.tx_queue;
-        let sent = self.tx_empty
+        let sent = self.rx_queue
             .drain(..count)
             .zip(handles.iter())
             .fold(0, |count, (packet, handle)| {
