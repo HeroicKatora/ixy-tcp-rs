@@ -5,9 +5,10 @@ authors = ["HeroicKatora <andreas.molzer@gmx.de>"]
 edition = "2018"
 
 [dependencies]
-ixy = { path = "ixy.rs" }
 ethox = { path = "ethox/ethox", features = ["std"] }
+ixy = { path = "ixy.rs" }
 
 [dev-dependencies]
+ethox-iperf = { path = "ethox/ethox-iperf3" }
 env_logger = "0.6"
 structopt = "0.2"
