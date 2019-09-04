@@ -203,7 +203,7 @@ impl nic::Handle for Handle {
         Ok(self.queued = true)
     }
 
-    fn info(&self) -> &nic::Info {
+    fn info(&self) -> &dyn nic::Info {
         self
     }
 }
@@ -221,5 +221,21 @@ impl nic::Info for Handle {
 impl wire::Payload for Packet {
     fn payload(&self) -> &wire::payload {
         self.0.as_ref().into()
+    }
+}
+
+impl wire::PayloadMut for Packet {
+    fn payload_mut(&mut self) -> &mut wire::payload {
+        self.0.as_mut().into()
+    }
+
+    fn resize(&mut self, length: usize) -> Result<(), wire::PayloadError> {
+        self.0.try_resize(length, 0u8)
+            .map_err(|_| wire::PayloadError::BadSize)
+    }
+
+    fn reframe(&mut self, reframe: wire::Reframe) -> Result<(), wire::PayloadError> {
+        // We always preserve the full prefix.
+        wire::PayloadMut::resize(self, reframe.length)
     }
 }
