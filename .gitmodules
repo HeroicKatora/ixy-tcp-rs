@@ -1,6 +1,6 @@
 [submodule "ixy.rs"]
 	path = ixy.rs
-	url = https://github.com/ixy-languages/ixy.rs
+	url = https://github.com/HeroicKatora/ixy.rs
 [submodule "smoltcp"]
 	path = smoltcp
 	url = https://github.com/HeroicKatora/smoltcp
