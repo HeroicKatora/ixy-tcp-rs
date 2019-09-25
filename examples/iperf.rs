@@ -3,14 +3,11 @@
 //! Connects to a given remote tcp host and sends a single provided message. Any incoming data is
 //! silently discarded without having been copied into a buffer (but no FIN sent).
 //!
-//! Prepend the ethox configuration to the usual iperf options. Call example:
+//! Prepend the ixy/ethox configuration to the usual iperf options. Call example:
 //!
-//! * `iperf3 tap0 10.0.0.1/24 ab:ff:ff:ff:ff:ff 10.0.0.2/24 -c 10.0.0.2 5001 -l 10000 -n 2470`
-
-use std::io::{stdout, Write};
+//! * `iperf3 '0000:01:00.0' 10.0.0.1/24 ab:ff:ff:ff:ff:ff 10.0.0.2/24 -c 10.0.0.2 5001 -n 10000 -l 1470 --udp`
 
 use ethox::managed::{List, Slice};
-use ethox::nic::Device;
 use ethox::layer::{eth, ip};
 
 use ethox_iperf::{config, iperf2};
@@ -19,9 +16,6 @@ use ixy::ixy_init;
 
 fn main() {
     let config = config::Config::from_args();
-
-    let out = stdout();
-    let mut out = out.lock();
 
     let ixy = ixy_init(&config.tap, 1, 1)
         .expect("Couldn't initialize ixy device");
@@ -37,19 +31,33 @@ fn main() {
         ip::Routes::import(List::new_full(routes.as_mut().into())),
         eth::NeighborCache::new(&mut neighbors[..]));
 
-    let mut iperf = iperf2::Iperf::new(&config.iperf3);
+    println!("[+] Configured layers, communicating");
 
-    out.write_all(b"[+] Configured layers, communicating").unwrap();
-
-    let result = loop {
-        interface.rx(10, eth.recv(ip.recv(&mut iperf))).unwrap();
-        interface.tx(10, eth.send(ip.send(&mut iperf))).unwrap();
-
-        if let Some(result) = iperf.result() {
-            break result;
-        }
+    let result = match &config.iperf3 {
+        config::Iperf3Config::Client(
+            config::IperfClient { kind: config::ClientKind::Udp, client
+        }) => {
+            ethox_iperf::client(
+                &mut interface,
+                10,
+                &mut eth,
+                &mut ip,
+                iperf2::Iperf::new(client),
+            )
+        },
+        config::Iperf3Config::Client(
+            config::IperfClient { kind: config::ClientKind::Tcp, client
+        }) => {
+            ethox_iperf::client(
+                &mut interface,
+                10,
+                &mut eth,
+                &mut ip,
+                iperf2::IperfTcp::new(client),
+            )
+        },
     };
 
-    out.write_all(b"[+] Done").unwrap();
-    write!(out, "{:?}", result).unwrap();
+    println!("[+] Done\n");
+    println!("{}", result);
 }
